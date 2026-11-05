@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LINE 圖卡發送器</title>
+<style>
+  :root {
+    --bg: #0e1a2a; --box: #1b2b3d; --accent: #f6a83a; --muted: #94a4b8; --text: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "PingFang TC", "Noto Sans TC", sans-serif; line-height: 1.5; }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 20px; color: var(--accent); margin: 0 0 4px; }
+  p.sub { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+  label { display: block; margin: 14px 0 4px; font-size: 14px; color: var(--accent); font-weight: 600; }
+  .hint { color: var(--muted); font-size: 12px; font-weight: 400; }
+  input, textarea { width: 100%; background: var(--box); color: var(--text);
+    border: 1px solid #2c4057; border-radius: 8px; padding: 10px; font-size: 16px; font-family: inherit; }
+  textarea { min-height: 96px; resize: vertical; }
+  .row { display: flex; gap: 8px; }
+  .row > div { flex: 1; }
+  button { width: 100%; margin-top: 18px; padding: 14px; border: 0; border-radius: 10px;
+    background: var(--accent); color: var(--bg); font-size: 16px; font-weight: 700; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); margin-top: 10px; }
+  #status { margin-top: 12px; font-size: 13px; color: var(--muted); min-height: 20px; white-space: pre-wrap; }
+  #status.err { color: #ff8a80; }
+  details { margin-top: 20px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  pre { background: var(--box); padding: 10px; border-radius: 8px; overflow: auto; font-size: 12px; max-height: 320px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>LINE 圖卡發送器</h1>
+  <p class="sub">填內容 → 分享到 LINE → 選群組，卡片會用你自己的名字發出去。</p>
+
+  <label>區塊標題（橘色大字）</label>
+  <input id="title" value="本期金句">
+
+  <label>金句 <span class="hint">每行一則，格式：金句 | 作者（作者可省略）</span></label>
+  <textarea id="quotes">做得美不難，但大家不一定願意付錢。先找痛點，再做出 MVP，最後才是美學品味 | Hans
+你做得不好就不會有人買，做得太好就會有人抄 | Hans
+我都先找到買家才做，先搞個 POC demo 給老闆看 | Lion@賴</textarea>
+
+  <label>第二區標題</label>
+  <input id="linksTitle" value="本期工具與資源">
+
+  <label>連結 <span class="hint">每行一則，格式：名稱 | 網址（要 https://）</span></label>
+  <textarea id="links">Hans 人生電影院 demo | https://example.com/1
+東東-Vic RO 生存者遊戲 | https://example.com/2</textarea>
+
+  <div class="row">
+    <div><label>按鈕文字</label><input id="btnText" value="看全部金句與資源"></div>
+    <div><label>按鈕網址</label><input id="btnUrl" value="https://example.com/all"></div>
+  </div>
+
+  <label>altText <span class="hint">聊天列表與通知會顯示，請寫成一句看得懂的摘要（上限 400 字）</span></label>
+  <input id="altText" value="本期金句與工具資源：3 則金句、2 個連結">
+
+  <button id="share">分享到 LINE</button>
+  <button id="copy" class="ghost">複製 JSON（貼到 Flex Message Simulator 預覽）</button>
+  <div id="status"></div>
+
+  <details><summary>預覽產生的 JSON</summary><pre id="json"></pre></details>
+</main>
+
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+// ===== 設定：把 LIFF ID 換成你在 LINE Developers 建立的（格式 1234567890-AbCdEfGh）=====
+const LIFF_ID = "YOUR_LIFF_ID";
+
+const C = { bg: "#0e1a2a", box: "#1b2b3d", accent: "#f6a83a", muted: "#94a4b8", text: "#ffffff" };
+const $ = (id) => document.getElementById(id);
+
+function parseLines(raw) {
+  return raw.split("\n").map(s => s.trim()).filter(Boolean).map(line => {
+    const i = line.lastIndexOf("|");
+    return i === -1 ? [line, ""] : [line.slice(0, i).trim(), line.slice(i + 1).trim()];
+  });
+}
+
+function buildFlex() {
+  const quotes = parseLines($("quotes").value).map(([text, who]) => ({
+    type: "box", layout: "vertical", backgroundColor: C.box, cornerRadius: "lg",
+    paddingAll: "lg", margin: "md",
+    contents: [
+      { type: "text", text: `「${text}」`, wrap: true, color: C.text, size: "md", weight: "bold" },
+      ...(who ? [{ type: "text", text: who, align: "end", color: C.muted, size: "sm", margin: "sm" }] : [])
+    ]
+  }));
+
+  const links = parseLines($("links").value)
+    .filter(([, url]) => /^https?:\/\//i.test(url))
+    .map(([name, url]) => ({
+      type: "box", layout: "baseline", spacing: "sm", margin: "sm",
+      action: { type: "uri", label: name.slice(0, 20), uri: url },
+      contents: [
+        { type: "text", text: "🔗", flex: 0, size: "md" },
+        { type: "text", text: name, color: C.text, size: "md", wrap: true, decoration: "underline", flex: 1 }
+      ]
+    }));
+
+  const body = [
+    { type: "text", text: $("title").value, color: C.accent, weight: "bold", size: "xl" },
+    ...quotes
+  ];
+  if (links.length) {
+    body.push(
+      { type: "separator", margin: "xl", color: "#2c4057" },
+      { type: "text", text: $("linksTitle").value, color: C.accent, weight: "bold", size: "lg", margin: "xl" },
+      ...links
+    );
+  }
+  const bubble = {
+    type: "bubble", size: "giga",
+    styles: { body: { backgroundColor: C.bg }, footer: { backgroundColor: C.bg } },
+    body: { type: "box", layout: "vertical", paddingAll: "xl", contents: body }
+  };
+  const btnUrl = $("btnUrl").value.trim();
+  if ($("btnText").value.trim() && /^https?:\/\//i.test(btnUrl)) {
+    bubble.footer = {
+      type: "box", layout: "vertical", paddingAll: "xl", paddingTop: "none",
+      contents: [{
+        type: "box", layout: "vertical", backgroundColor: C.accent, cornerRadius: "lg",
+        paddingAll: "md", action: { type: "uri", label: "open", uri: btnUrl },
+        contents: [{ type: "text", text: $("btnText").value.trim(), align: "center", weight: "bold", color: C.bg }]
+      }]
+    };
+  }
+  return {
+    type: "flex",
+    altText: ($("altText").value.trim() || $("title").value || "新訊息").slice(0, 400),
+    contents: bubble
+  };
+}
+
+function refresh() { $("json").textContent = JSON.stringify(buildFlex(), null, 2); }
+function say(msg, err) { const s = $("status"); s.textContent = msg; s.className = err ? "err" : ""; }
+
+document.querySelectorAll("input, textarea").forEach(el => el.addEventListener("input", refresh));
+refresh();
+
+let ready = false;
+(async () => {
+  if (LIFF_ID === "YOUR_LIFF_ID") { say("尚未設定 LIFF_ID，目前只能複製 JSON。設定方式見 README。", true); return; }
+  try {
+    await liff.init({ liffId: LIFF_ID });
+    if (!liff.isLoggedIn()) { liff.login(); return; }
+    ready = true;
+    say(liff.isApiAvailable("shareTargetPicker") ? "就緒，可以分享。" : "此環境不支援 shareTargetPicker，請在 LINE App 內開啟 liff.line.me 連結。", !liff.isApiAvailable("shareTargetPicker"));
+  } catch (e) { say("LIFF 初始化失敗：" + e.message, true); }
+})();
+
+$("share").onclick = async () => {
+  if (!ready) { say("LIFF 尚未就緒（檢查 LIFF_ID，並用 LINE 內開啟）。", true); return; }
+  try {
+    const r = await liff.shareTargetPicker([buildFlex()]);
+    say(r ? "已送出 ✅" : "你取消了分享。");
+  } catch (e) { say("分享失敗：" + e.message, true); }
+};
+
+$("copy").onclick = async () => {
+  try { await navigator.clipboard.writeText(JSON.stringify(buildFlex().contents, null, 2)); say("已複製（僅 bubble 內容，可貼到 Simulator）。"); }
+  catch { say("複製失敗，請展開下方 JSON 手動複製。", true); }
+};
+</script>
+</body>
+</html>
